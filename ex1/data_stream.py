@@ -11,7 +11,11 @@ class DataStream(ABC):
     def process_batch(self, data_batch: List[Any]) -> str:
         pass
 
-    def filter_data(self, data_batch: List[Any], criteria: Optional[str] = None) -> List[Any]:
+    def filter_data(
+        self,
+        data_batch: List[Any],
+        criteria: Optional[str] = None
+    ) -> List[Any]:
         if criteria:
             return [x for x in data_batch
                     if x is not None and isinstance(x, str) and criteria in x]
@@ -31,7 +35,9 @@ class SensorStream(DataStream):
 
     def process_batch(self, data: List[Union[int, float]]) -> str:
         clean = self.filter_data(data)
-
+        temp_value = []
+        for data in clean:
+            temp_value.append(float(data))
         count = len(clean)
 
         if count == 0:
@@ -40,10 +46,10 @@ class SensorStream(DataStream):
             return f"{self.stream_id}: 0 readings processed, avg temp: 0.0°C"
 
         self.processed_count = count
-        self.last_avg = min(data)
+        self.last_avg = sum(temp_value) / count
 
         return (
-            f"{self.stream_id}: {count} readings processed, "
+            f"Sensor analysis: {count} readings processed, "
             f"avg temp: {self.last_avg:.1f}°C"
         )
 
@@ -62,28 +68,39 @@ class TransactionStream(DataStream):
         self.processed_count = 0
         self.net_flow = 0
 
-    def process_batch(self, data: List[str]) -> str:
+    def process_batch(self, data: List[Any]) -> str:
         clean = self.filter_data(data)
         count = len(clean)
         buy_total = 0
         sell_total = 0
 
         for transaction in clean:
-            action, value = transaction.split(":")
-            value = float(value)
-            if action == "buy":
-                buy_total += value
-            elif action == "sell":
-                sell_total += value
+
+            # Case1: string →"buy:100"
+            if isinstance(transaction, str):
+                action, value = transaction.split(":")
+                value = float(value)
+
+                if action == "buy":
+                    buy_total += value
+                elif action == "sell":
+                    sell_total += value
+
+            # Case2: number→ 100 or -50
+            elif isinstance(transaction, (int, float)):
+                if transaction >= 0:
+                    buy_total += transaction
+                else:
+                    sell_total += abs(transaction)
 
         total = buy_total - sell_total
         self.net_flow = total
         self.processed_count = count
 
         result = (
-                f"Transaction analysis: {count} operations, "
-                f"net flow: {total:+.0f} units"
-                )
+            f"Transaction analysis: {count} operations, "
+            f"net flow: {total:+.0f} units"
+        )
         return result
 
     def get_stats(self) -> Dict[str, Union[str, int, float]]:
@@ -109,11 +126,7 @@ class EventStream(DataStream):
 
         self.processed_count = total_events
         self.error_count = error_count
-
-        return (
-            f"{self.stream_id}: {total_events} events, "
-            f"{error_count} error detected"
-        )
+        return f"Event data: {total_events} events processed"
 
     def get_stats(self) -> Dict[str, Union[str, int, float]]:
         return {
@@ -125,14 +138,19 @@ class EventStream(DataStream):
 
 
 class StreamProcessor:
-    def run_pipeline(self, streams: List[DataStream], mixed_data: List[List[Any]]) -> List[str]:
+    def run_pipeline(
+        self,
+        streams: List[DataStream],
+        mixed_data: List[List[Any]]
+    ) -> List[str]:
         results = []
         for stream, data in zip(streams, mixed_data):
             try:
                 result = stream.process_batch(data)
                 results.append(result)
             except Exception as e:
-                results.append(f"{stream.stream_id}: Error - {e}")
+                results.append(f"Processing error: {e}")
+
         return results
 
 
@@ -160,13 +178,10 @@ if __name__ == "__main__":
     print("\nInitializing Transaction Stream...")
     print(f"Stream ID: {transaction.stream_id}, Type: Financial Data")
 
-    transaction_data = [100, 150, 75]
-    typ = ("buy:", "sell:", "buy: ")
-    t_data = []
-    for t, d in zip(typ, transaction_data):
-        t_data.append(t + str(d))
-    print(f"Processing transaction batch: [{(', ').join(t_data)}]")
-    print(transaction.process_batch(t_data))
+    transaction_data = ("buy:100", "sell:150", "buy:75")
+
+    print(f"Processing transaction batch:[{(', ').join(transaction_data)}]")
+    print(transaction.process_batch(transaction_data))
 
     # # Event Stream
     event = EventStream("EVENT_001")
@@ -177,9 +192,9 @@ if __name__ == "__main__":
     print("Processing event batch: [login, error, logout]")
     print(event.process_batch(event_data))
 
-    # # --- POLYMORPHIC ENGINE ---
+    #  POLYMORPHIC ENGINE
     print("\n=== Polymorphic Stream Processing ===")
-    print("Processing mixed stream types through unified interface...")
+    print("Processing mixed stream types through unified interface...\n")
 
     processor = StreamProcessor()
 
@@ -192,19 +207,17 @@ if __name__ == "__main__":
     for r in results:
         print(f"- {r}")
 
-    # --- FILTERING DEMO (dynamic via polymorphism) ---
+    #  FILTERING DEMO (dynamic via polymorphism)
     print("\nStream filtering active: High-priority data only")
 
     filtered_sensor = sensor.filter_data(sensor_data)
     filtered_transaction = transaction.filter_data(transaction_data)
     filtered_event = event.filter_data(event_data, "error")
 
-    filtered_result = (
+    print(
         f"{len(filtered_sensor)} critical sensor alerts, "
-        f"{len(filtered_transaction)} large transaction, "
+        f"{len(filtered_transaction)} large transactions, "
         f"{len(filtered_event)} event flags"
     )
-
-    print(f"Filtered results: {filtered_result}")
 
     print("\nAll streams processed successfully. Nexus throughput optimal.")
